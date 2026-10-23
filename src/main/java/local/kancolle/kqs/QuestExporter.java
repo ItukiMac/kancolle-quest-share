@@ -63,6 +63,9 @@ public final class QuestExporter {
         root.put("meaning_of_all", "available/unlocked quests observed by game and cached in logbook-kai; NOT locked prerequisites, historical completions, or all quests in the game");
         Map<String, Object> capture = store.captureEvidence();
         root.put("capture", capture);
+        Map<String,Object> completeness=store.validate(values);
+        root.put("completeness",completeness);
+        root.put("snapshot_verified",completeness.get("verified"));
         root.put("all_tab_current_session", Boolean.TRUE.equals(capture.get("all_tab_observed_this_session")));
         List<String> limitations = new ArrayList<>();
         limitations.add("The game's currently locked / unreleased / prerequisite-dependent quests are not enumerated by questlist.");
@@ -74,6 +77,9 @@ public final class QuestExporter {
             limitations.add("KQS has NOT witnessed the game's 全て / ALL quest tab this session: current completeness cannot be verified.");
         }
         root.put("limitations", limitations);
+        if (!Boolean.TRUE.equals(completeness.get("verified"))) {
+            limitations.add("Snapshot is NOT verified against a fresh complete ALL-tab API response; use the completeness.status field.");
+        }
         root.put("external_reference_sites", List.of("https://wikiwiki.jp/kancolle/", "https://zekamashi.net"));
 
         List<Map<String, Object>> quests = new ArrayList<>();
@@ -119,18 +125,64 @@ public final class QuestExporter {
             item.put("unlocks_quest_ids", null);
             item.put("choice_reward_details", null);
             item.put("exact_objective_counter", null);
+            Map<String,Object> local=null;
             if (enrich && id!=null) {
-                try { item.put("local_quest_condition", condition(id)); }
-                catch (RuntimeException e) { item.put("local_quest_condition", null); }
-            } else {
-                item.put("local_quest_condition", null);
+                try { local=condition(id); }
+                catch (RuntimeException e) { local=null; }
             }
+            item.put("local_quest_condition", local);
+            item.put("local_condition_role",local==null?"unavailable":"advisory_not_authoritative");
+            List<String> warnings=conditionWarnings(q,local);
+            item.put("condition_conflict_codes",warnings);
+            item.put("condition_needs_external_verification",local==null || !warnings.isEmpty());
             quests.add(item);
         }
         root.put("counts", Map.of("total_known", quests.size(), "accepted", accepted,
             "completed_unclaimed", completedPending, "available_unaccepted", unaccepted, "unknown", other));
         root.put("quests", quests);
         return root;
+    }
+
+    /**
+     * API description is authoritative for the current quest text; packaged
+     * logbook conditions can lag behind reused event quest IDs.
+     */
+    private static List<String> conditionWarnings(QuestList.Quest api,Map<String,Object> local) {
+        List<String> warnings=new ArrayList<>();
+        if(local==null)return warnings;
+        Object reset=local.get("reset_type");
+        String period=api.getType()==null?"unknown":recurrence(api.getType());
+        String localPeriod=canonicalReset(reset);
+        if(!"unknown".equals(localPeriod) && !period.equals("other_or_quarterly_or_yearly")
+                && !period.equals("unknown") && !localPeriod.equals(period)) {
+            warnings.add("api_local_recurrence_conflict");
+        }
+        // Flag an ambiguous name-list discrepancy rather than asserting the
+        // local fleet rule is wrong: remodel names or shorthand can differ.
+        Object filter=local.get("filter");
+        if(filter instanceof Map<?,?> fm && fm.get("fleet") instanceof Map<?,?> fleet) {
+            String detail=clean(api.getDetail());
+            if(fleet.get("ship_names") instanceof Collection<?> names) {
+                int unmentioned=0;
+                for(Object name:names)if(name instanceof String str && !detail.contains(str))unmentioned++;
+                if(!names.isEmpty() && unmentioned>0)
+                    warnings.add("possible_fleet_name_conflict_check_api_detail");
+            }
+        }
+        return warnings;
+    }
+
+    private static String canonicalReset(Object raw) {
+        if(!(raw instanceof String s))return "unknown";
+        return switch(s) {
+            case "デイリー" -> "daily";
+            case "ウィークリー" -> "weekly";
+            case "マンスリー" -> "monthly";
+            case "単発" -> "one_time";
+            case "クオータリー","クォータリー" -> "quarterly";
+            case "イヤリー" -> "yearly";
+            default -> "unknown";
+        };
     }
 
     private static Map<String, Object> condition(int id) {
@@ -213,8 +265,8 @@ public final class QuestExporter {
     }
     private static String category(Integer n) {
         if(n==null)return "unknown";
-        return switch(n){case 1->"formation";case 2,8,9->"sortie";case 3->"practice";
+        return switch(n){case 1->"formation";case 2,8,9,10->"sortie";case 3->"practice";
             case 4->"expedition";case 5->"supply";case 6->"factory";
-            case 7->"modernization";default->"other";};
+            case 7->"modernization";case 11->"factory";default->"other";};
     }
 }
