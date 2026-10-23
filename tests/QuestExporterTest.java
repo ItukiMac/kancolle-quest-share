@@ -45,6 +45,8 @@ public final class QuestExporterTest {
         check(initial.path("counts").path("accepted").asInt()==1,"accepted count");
         check(initial.path("counts").path("completed_unclaimed").asInt()==1,"completed count");
         check(!initial.path("all_tab_current_session").asBoolean(),"missing all-tab evidence");
+        check(!initial.path("snapshot_verified").asBoolean(),"not initially verified");
+        check("not_observed".equals(initial.path("completeness").path("status").asText()),"unverified reason");
         check(initial.path("quests").get(0).path("basic_reward_materials").size()==4,"reward materials");
         check(initial.path("quests").get(1).path("progress_stage").asText().contains("50"),"progress stage");
         check(initial.path("quests").get(0).path("prerequisite_quest_ids").isNull(),"unknown prerequisites explicit");
@@ -54,11 +56,49 @@ public final class QuestExporterTest {
         check(store.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","0","api_page_no","1"),example),"all-tab capture");
         JsonNode observed = new ObjectMapper().readTree(QuestExporter.encode(QuestExporter.build(store,all,false)));
         check(observed.path("all_tab_current_session").asBoolean(),"all-tab observed");
+        check(!observed.path("snapshot_verified").asBoolean(),"one item for API count 3 is not verified");
+        check("incomplete_api_snapshot".equals(observed.path("completeness").path("status").asText()),"API count mismatch");
         check(observed.path("capture").path("api_count").asInt()==3,"api total count");
         check(observed.path("capture").path("api_exec_count").asInt()==2,"accepted total count");
         check(!observed.toString().contains("api_token"),"no POST auth parameter");
         check(!observed.toString().contains("SECRET"),"no secret value");
         check(observed.path("scope").asText().contains("logbook_kai"),"source scope");
+
+        QuestStore complete=new QuestStore();
+        String full="svdata={\"api_result\":1,\"api_data\":{\"api_count\":3,\"api_exec_count\":2,\"api_list\":["+
+            "{\"api_no\":11,\"api_title\":\"未受注任務\",\"api_state\":1,\"api_progress_flag\":0},"+
+            "{\"api_no\":12,\"api_title\":\"受注中任務\",\"api_state\":2,\"api_progress_flag\":1},"+
+            "{\"api_no\":13,\"api_title\":\"達成未受領\",\"api_state\":3,\"api_progress_flag\":2}]}}";
+        check(complete.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","0","api_page_no","1"),full),"full API tab");
+        JsonNode valid = new ObjectMapper().readTree(QuestExporter.encode(QuestExporter.build(complete,all,false)));
+        check(valid.path("snapshot_verified").asBoolean(),"verified all tab matching IDs, states and progress");
+        check(valid.path("capture").path("observed_page_keys").get(0).asText().equals("0:1"),"page evidence preserved");
+        QuestList.Quest inconsistent=makeQuest(12,"別の状態",1,1).getQuest();
+        List<AppQuest> changed = List.of(all.get(0),makeQuest(12,"状態不一致",1,1),all.get(2));
+        JsonNode invalid = new ObjectMapper().readTree(QuestExporter.encode(QuestExporter.build(complete,changed,false)));
+        check(!invalid.path("snapshot_verified").asBoolean(),"reject stale collection state");
+        check(invalid.path("completeness").path("ids_state_or_progress_mismatch").size()==1,"mismatch ID included");
+        check(complete.accept("/kcsapi/api_req_quest/start",Map.of("api_quest_id","12"),"svdata={\"api_result\":1,\"api_data\":{}}"),"subsequent mutation");
+        JsonNode mutated = new ObjectMapper().readTree(QuestExporter.encode(QuestExporter.build(complete,all,false)));
+        check("mutation_since_capture".equals(mutated.path("completeness").path("status").asText()),"dirty after quest action");
+
+        QuestList.Quest ten=makeQuest(14,"出撃カテゴリ10",1,0).getQuest();
+        ten.setCategory(10);
+        QuestList.Quest eleven=makeQuest(15,"工廠カテゴリ11",1,0).getQuest();
+        eleven.setCategory(11);
+        AppQuest a10=new AppQuest();a10.setNo(14);a10.setQuest(ten);
+        AppQuest a11=new AppQuest();a11.setNo(15);a11.setQuest(eleven);
+        JsonNode category = new ObjectMapper().readTree(QuestExporter.encode(QuestExporter.build(new QuestStore(),List.of(a10,a11),false)));
+        check("sortie".equals(category.path("quests").get(0).path("category").asText()),"category 10 sortie");
+        check("factory".equals(category.path("quests").get(1).path("category").asText()),"category 11 factory");
+
+        QuestList.Quest api=makeQuest(987,"期間限定",1,0).getQuest();
+        api.setType(3);api.setDetail("「鈴谷」「朧」を使う");
+        Map<String,Object> local=Map.of("reset_type","ウィークリー","filter",Map.of("fleet",Map.of("ship_names",List.of("鈴谷","Minneapolis"))));
+        var warnings=QuestExporter.conditionWarnings(api,local);
+        check(warnings.contains("api_local_recurrence_conflict"),"period mismatch flagged");
+        check(warnings.contains("possible_fleet_name_conflict_check_api_detail"),"fleet conflict flagged");
+        check(QuestExporter.conditionWarnings(api,null).isEmpty(),"null condition safe");
         System.out.println("QuestExporter tests PASS");
     }
 }
