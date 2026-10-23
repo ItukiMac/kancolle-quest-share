@@ -147,7 +147,7 @@ public final class QuestExporter {
      * API description is authoritative for the current quest text; packaged
      * logbook conditions can lag behind reused event quest IDs.
      */
-    private static List<String> conditionWarnings(QuestList.Quest api,Map<String,Object> local) {
+    static List<String> conditionWarnings(QuestList.Quest api,Map<String,Object> local) {
         List<String> warnings=new ArrayList<>();
         if(local==null)return warnings;
         Object reset=local.get("reset_type");
