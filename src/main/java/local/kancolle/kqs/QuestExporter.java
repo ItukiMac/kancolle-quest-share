@@ -83,6 +83,8 @@ public final class QuestExporter {
         root.put("external_reference_sites", List.of("https://wikiwiki.jp/kancolle/", "https://zekamashi.net"));
 
         List<Map<String, Object>> quests = new ArrayList<>();
+        List<Integer> conditionMissingIds=new ArrayList<>();
+        List<Integer> conditionWarningIds=new ArrayList<>();
         int accepted = 0, completedPending = 0, unaccepted = 0, other = 0;
         List<AppQuest> sorted = values.stream().filter(Objects::nonNull).filter(q -> q.getQuest()!=null)
             .sorted(Comparator.comparing(q -> q.getNo()==null?Integer.MAX_VALUE:q.getNo())).toList();
@@ -135,10 +137,20 @@ public final class QuestExporter {
             List<String> warnings=conditionWarnings(q,local);
             item.put("condition_conflict_codes",warnings);
             item.put("condition_needs_external_verification",local==null || !warnings.isEmpty());
+            if (id!=null && local==null) conditionMissingIds.add(id);
+            if (id!=null && !warnings.isEmpty()) conditionWarningIds.add(id);
             quests.add(item);
         }
         root.put("counts", Map.of("total_known", quests.size(), "accepted", accepted,
             "completed_unclaimed", completedPending, "available_unaccepted", unaccepted, "unknown", other));
+        root.put("condition_coverage",Map.of(
+            "local_condition_available",quests.size()-conditionMissingIds.size(),
+            "local_condition_missing",conditionMissingIds.size(),
+            "local_condition_missing_ids",conditionMissingIds,
+            "local_condition_warning_count",conditionWarningIds.size(),
+            "local_condition_warning_ids",conditionWarningIds,
+            "meaning","Local conditions are advisory; absence or no warning is not external verification."
+        ));
         root.put("quests", quests);
         return root;
     }
@@ -157,19 +169,49 @@ public final class QuestExporter {
                 && !period.equals("unknown") && !localPeriod.equals(period)) {
             warnings.add("api_local_recurrence_conflict");
         }
-        // Flag an ambiguous name-list discrepancy rather than asserting the
-        // local fleet rule is wrong: remodel names or shorthand can differ.
+        // Compare only when the API explicitly enumerates ship names.
+        // Generic descriptions such as "米英艦艇" are not fleet name lists.
         Object filter=local.get("filter");
         if(filter instanceof Map<?,?> fm && fm.get("fleet") instanceof Map<?,?> fleet) {
-            String detail=clean(api.getDetail());
-            if(fleet.get("ship_names") instanceof Collection<?> names) {
-                int unmentioned=0;
-                for(Object name:names)if(name instanceof String str && !detail.contains(str))unmentioned++;
-                if(!names.isEmpty() && unmentioned>0)
-                    warnings.add("possible_fleet_name_conflict_check_api_detail");
+            java.util.Set<String> localNames=new java.util.LinkedHashSet<>();
+            collectShipNames(fleet,localNames,0);
+            java.util.Set<String> explicit=quotedNames(clean(api.getDetail()));
+            int compared=0, missing=0;
+            for(String name:explicit) {
+                if(name.endsWith("型") || name.endsWith("隊") || name.endsWith("艦"))continue;
+                compared++;
+                if(!localNames.stream().anyMatch(candidate->candidate.equals(name) ||
+                    candidate.contains(name) || name.contains(candidate)))missing++;
             }
+            // Without any cross-match, the quotation might refer to
+            // equipment/places rather than ship names: do not alert.
+            boolean overlap=localNames.stream().anyMatch(candidate->
+                explicit.stream().anyMatch(name->name.equals(candidate) || name.contains(candidate) || candidate.contains(name)));
+            if(overlap && compared>=2 && missing>0)
+                warnings.add("possible_fleet_name_conflict_check_api_detail");
         }
         return warnings;
+    }
+
+    private static void collectShipNames(Map<?,?> fleet,java.util.Set<String> names,int depth) {
+        if(depth>16 || fleet==null)return;
+        Object list=fleet.get("ship_names");
+        if(list instanceof Collection<?> col)for(Object n:col)if(n instanceof String str && !str.isBlank())names.add(str);
+        Object children=fleet.get("conditions");
+        if(children instanceof Collection<?> col)
+            for(Object child:col)if(child instanceof Map<?,?> map)collectShipNames(map,names,depth+1);
+    }
+
+    private static java.util.Set<String> quotedNames(String apiDetail) {
+        java.util.Set<String> names=new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher m=java.util.regex.Pattern.compile("「([^」]+)」").matcher(apiDetail);
+        while(m.find()) {
+            for(String token:m.group(1).split("[・,、]")) {
+                String trimmed=token.trim();
+                if(!trimmed.isEmpty())names.add(trimmed);
+            }
+        }
+        return names;
     }
 
     private static String canonicalReset(Object raw) {

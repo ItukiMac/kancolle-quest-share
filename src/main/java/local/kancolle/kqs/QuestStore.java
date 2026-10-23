@@ -1,16 +1,26 @@
 package local.kancolle.kqs;
 
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneId;
 import java.util.*;
 
 /** Token-free in-memory quest state. All methods are synchronized. */
 public final class QuestStore {
     private record Quest(int id,String title,String detail,int state,int progress,Instant seen) {}
+    private final Clock clock;
+    public QuestStore() { this(Clock.systemUTC()); }
+    QuestStore(Clock clock) { this.clock=Objects.requireNonNull(clock); }
     private final Map<Integer,Quest> quests=new LinkedHashMap<>();
     private final Map<String,Instant> pages=new LinkedHashMap<>();
     // Raw API snapshot, used only to validate the logbook-kai AppQuestCollection.
     private final Map<Integer,Integer> allTabStates=new LinkedHashMap<>();
     private final Map<Integer,Integer> allTabProgress=new LinkedHashMap<>();
+    private final Map<Integer,String> allTabTitles=new LinkedHashMap<>();
+    private final Map<Integer,String> allTabDetails=new LinkedHashMap<>();
+    private final Map<Integer,Integer> allTabTypes=new LinkedHashMap<>();
+    private final Map<Integer,Integer> allTabCategories=new LinkedHashMap<>();
     private Instant lastQuestMutation;
     private int observedAllPages;
     private boolean allTabHasUnnumberedPage;
@@ -38,7 +48,7 @@ public final class QuestStore {
         try{raw=Json.parse(body.startsWith("svdata=")?body.substring(7):body);}
         catch(RuntimeException error){return false;}
         if(!(raw instanceof Map<?,?> response)||number(response.get("api_result"),0)!=1)return false;
-        Object data=response.get("api_data"); Instant now=Instant.now();
+        Object data=response.get("api_data"); Instant now=clock.instant();
         if(kind.equals("list")){
             if(!(data instanceof Map<?,?> detail)||!(detail.get("api_list") instanceof List<?> list))return false;
             int page=parseInt(params==null?null:params.get("api_page_no"),1);
@@ -49,6 +59,10 @@ public final class QuestStore {
                 if (page==1) {
                     allTabStates.clear();
                     allTabProgress.clear();
+                    allTabTitles.clear();
+                    allTabDetails.clear();
+                    allTabTypes.clear();
+                    allTabCategories.clear();
                     observedAllPages=0;
                     allTabHasUnnumberedPage=false;
                     allTabReportedTotal=null;
@@ -80,6 +94,10 @@ public final class QuestStore {
                 if ("0".equals(tab)) {
                     allTabStates.put(id,state);
                     allTabProgress.put(id,progress);
+                    if(q.get("api_title")!=null)allTabTitles.put(id,strip(q.get("api_title"),200));
+                    if(q.get("api_detail")!=null)allTabDetails.put(id,strip(q.get("api_detail"),700));
+                    if(q.get("api_type")!=null)allTabTypes.put(id,number(q.get("api_type"),-1));
+                    if(q.get("api_category")!=null)allTabCategories.put(id,number(q.get("api_category"),-1));
                 }
             }
         }else{
@@ -121,34 +139,54 @@ public final class QuestStore {
     public synchronized Map<String,Object> validate(Collection<logbook.bean.AppQuest> apps) {
         Map<Integer,Integer> actual=new LinkedHashMap<>();
         Map<Integer,Integer> progress=new LinkedHashMap<>();
+        Map<Integer,String> titles=new LinkedHashMap<>();
+        Map<Integer,String> descriptions=new LinkedHashMap<>();
+        Map<Integer,Integer> types=new LinkedHashMap<>();
+        Map<Integer,Integer> categories=new LinkedHashMap<>();
         for (logbook.bean.AppQuest app:apps) {
             if(app==null || app.getQuest()==null || app.getQuest().getNo()==null) continue;
             logbook.bean.QuestList.Quest q=app.getQuest();
             actual.put(q.getNo(), q.getState());
             progress.put(q.getNo(), q.getProgressFlag());
+            titles.put(q.getNo(),strip(q.getTitle(),200));
+            descriptions.put(q.getNo(),strip(q.getDetail(),700));
+            types.put(q.getNo(),q.getType());
+            categories.put(q.getNo(),q.getCategory());
         }
         List<Integer> missing=new ArrayList<>();
         List<Integer> extra=new ArrayList<>();
         List<Integer> changed=new ArrayList<>();
+        List<Integer> changedMetadata=new ArrayList<>();
         for (Integer id:allTabStates.keySet()) {
             if(!actual.containsKey(id)) missing.add(id);
             else if(!Objects.equals(actual.get(id),allTabStates.get(id)) ||
                     !Objects.equals(progress.get(id),allTabProgress.get(id))) changed.add(id);
+            else if ((allTabTitles.containsKey(id) && !Objects.equals(titles.get(id),allTabTitles.get(id))) ||
+                (allTabDetails.containsKey(id) && !Objects.equals(descriptions.get(id),allTabDetails.get(id))) ||
+                (allTabTypes.containsKey(id) && !Objects.equals(types.get(id),allTabTypes.get(id))) ||
+                (allTabCategories.containsKey(id) && !Objects.equals(categories.get(id),allTabCategories.get(id))))
+                changedMetadata.add(id);
         }
         for(Integer id:actual.keySet())if(!allTabStates.containsKey(id)) extra.add(id);
         boolean allSeen=lastAllTab!=null;
         boolean apiSizeMatches=allTabReportedTotal!=null && allTabReportedTotal==allTabStates.size();
-        boolean notExpired=allSeen && java.time.Duration.between(lastAllTab,Instant.now()).toMinutes()<15;
+        Instant now=clock.instant();
+        Duration age=allSeen?Duration.between(lastAllTab,now):null;
+        boolean notExpired=allSeen && !age.isNegative() && age.compareTo(Duration.ofMinutes(15))<0;
+        boolean pagesComplete=true;
+        if(allTabReportedPages!=null && allTabReportedPages>0) {
+            for(int n=1;n<=allTabReportedPages;n++)if(!pages.containsKey("0:"+n))pagesComplete=false;
+        }
         boolean noNewMutation=allSeen && (lastQuestMutation==null || !lastQuestMutation.isAfter(lastAllTab));
         // Game daily reset at 05:00 JST invalidates a previously captured snapshot.
-        java.time.ZoneId jst=java.time.ZoneId.of("Asia/Tokyo");
+        ZoneId jst=ZoneId.of("Asia/Tokyo");
         boolean sameGameDay=allSeen &&
             lastAllTab.atZone(jst).minusHours(5).toLocalDate()
-                .equals(Instant.now().atZone(jst).minusHours(5).toLocalDate());
+                                .equals(now.atZone(jst).minusHours(5).toLocalDate());
         String verdict;
         if (!allSeen) verdict="not_observed";
-        else if (!apiSizeMatches) verdict="incomplete_api_snapshot";
-        else if(!missing.isEmpty() || !extra.isEmpty() || !changed.isEmpty()) verdict="logbook_api_mismatch";
+        else if (!apiSizeMatches || !pagesComplete) verdict="incomplete_api_snapshot";
+        else if(!missing.isEmpty() || !extra.isEmpty() || !changed.isEmpty() || !changedMetadata.isEmpty()) verdict="logbook_api_mismatch";
         else if(!noNewMutation) verdict="mutation_since_capture";
         else if(!notExpired || !sameGameDay) verdict="stale";
         else verdict="verified";
@@ -162,6 +200,8 @@ public final class QuestStore {
         evidence.put("ids_missing_in_logbook",missing);
         evidence.put("ids_extra_in_logbook",extra);
         evidence.put("ids_state_or_progress_mismatch",changed);
+        evidence.put("ids_metadata_mismatch",changedMetadata);
+        evidence.put("all_tab_page_coverage_complete",pagesComplete);
         evidence.put("freshness_max_minutes",15);
         evidence.put("fresh_within_15_minutes",notExpired);
         evidence.put("same_game_day",sameGameDay);
