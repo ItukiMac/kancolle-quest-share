@@ -83,6 +83,8 @@ public final class QuestExporter {
         root.put("external_reference_sites", List.of("https://wikiwiki.jp/kancolle/", "https://zekamashi.net"));
 
         List<Map<String, Object>> quests = new ArrayList<>();
+        List<Integer> conditionMissingIds=new ArrayList<>();
+        List<Integer> conditionWarningIds=new ArrayList<>();
         int accepted = 0, completedPending = 0, unaccepted = 0, other = 0;
         List<AppQuest> sorted = values.stream().filter(Objects::nonNull).filter(q -> q.getQuest()!=null)
             .sorted(Comparator.comparing(q -> q.getNo()==null?Integer.MAX_VALUE:q.getNo())).toList();
@@ -135,10 +137,20 @@ public final class QuestExporter {
             List<String> warnings=conditionWarnings(q,local);
             item.put("condition_conflict_codes",warnings);
             item.put("condition_needs_external_verification",local==null || !warnings.isEmpty());
+            if (id!=null && local==null) conditionMissingIds.add(id);
+            if (id!=null && !warnings.isEmpty()) conditionWarningIds.add(id);
             quests.add(item);
         }
         root.put("counts", Map.of("total_known", quests.size(), "accepted", accepted,
             "completed_unclaimed", completedPending, "available_unaccepted", unaccepted, "unknown", other));
+        root.put("condition_coverage",Map.of(
+            "local_condition_available",quests.size()-conditionMissingIds.size(),
+            "local_condition_missing",conditionMissingIds.size(),
+            "local_condition_missing_ids",conditionMissingIds,
+            "local_condition_warning_count",conditionWarningIds.size(),
+            "local_condition_warning_ids",conditionWarningIds,
+            "meaning","Local conditions are advisory; absence or no warning is not external verification."
+        ));
         root.put("quests", quests);
         return root;
     }
