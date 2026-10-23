@@ -68,7 +68,7 @@ public final class QuestExporterTest {
         String full="svdata={\"api_result\":1,\"api_data\":{\"api_count\":3,\"api_exec_count\":2,\"api_list\":["+
             "{\"api_no\":11,\"api_title\":\"未受注任務\",\"api_state\":1,\"api_progress_flag\":0},"+
             "{\"api_no\":12,\"api_title\":\"受注中任務\",\"api_state\":2,\"api_progress_flag\":1},"+
-            "{\"api_no\":13,\"api_title\":\"達成未受領\",\"api_state\":3,\"api_progress_flag\":2}]}}";
+            "{\"api_no\":13,\"api_title\":\"達成・未受領任務\",\"api_state\":3,\"api_progress_flag\":2}]}}";
         check(complete.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","0","api_page_no","1"),full),"full API tab");
         JsonNode valid = new ObjectMapper().readTree(QuestExporter.encode(QuestExporter.build(complete,all,false)));
         check(valid.path("snapshot_verified").asBoolean(),"verified all tab matching IDs, states and progress");
