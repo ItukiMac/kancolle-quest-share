@@ -10,6 +10,10 @@ public final class QuestStore {
     private final Map<String,Instant> pages=new LinkedHashMap<>();
     private Instant lastUpdate,lastList;
     private Integer reportedAccepted;
+    private Integer reportedTotal;
+    private Integer reportedPages;
+    private Instant lastAllTab;
+    private String lastTab;
     private int acceptedEvents;
 
     public synchronized boolean accept(String path,Map<String,String> params,String body) {
@@ -31,7 +35,12 @@ public final class QuestStore {
             if(!(data instanceof Map<?,?> detail)||!(detail.get("api_list") instanceof List<?> list))return false;
             int page=parseInt(params==null?null:params.get("api_page_no"),1);
             String tab=strip(params==null?"all":params.getOrDefault("api_tab_id","all"),20);
-            pages.put(tab+":"+page,now);lastList=now;
+            pages.put(tab+":"+page,now);lastList=now;lastTab=tab;
+            if ("0".equals(tab)) lastAllTab=now;
+            Integer total=optionalNumber(detail.get("api_count"));
+            if(total!=null)reportedTotal=total;
+            Integer count=optionalNumber(detail.get("api_page_count"));
+            if(count!=null)reportedPages=count;
             Integer reported=optionalNumber(detail.get("api_exec_count"));
             if(reported!=null)reportedAccepted=reported;
             for(Object obj:list){
@@ -58,6 +67,20 @@ public final class QuestStore {
         return true;
     }
 
+    public synchronized Map<String,Object> captureEvidence() {
+        Map<String,Object> data=new LinkedHashMap<>();
+        data.put("quest_list_observed", lastList!=null);
+        data.put("all_tab_observed_this_session", lastAllTab!=null);
+        data.put("last_list_at", lastList==null?null:lastList.toString());
+        data.put("last_all_tab_at", lastAllTab==null?null:lastAllTab.toString());
+        data.put("last_tab_id", lastTab);
+        data.put("api_count", reportedTotal);
+        data.put("api_page_count", reportedPages);
+        data.put("api_exec_count", reportedAccepted);
+        data.put("observed_page_keys", List.copyOf(pages.keySet()));
+        data.put("observed_quest_events", acceptedEvents);
+        return data;
+    }
     public synchronized int activeCount(){
         return (int)quests.values().stream().filter(q->q.state==2||q.state==3).count();
     }
