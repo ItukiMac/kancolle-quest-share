@@ -194,7 +194,7 @@ public final class QuestExporter {
         java.util.Set<String> names=new java.util.LinkedHashSet<>();
         java.util.regex.Matcher m=java.util.regex.Pattern.compile("「([^」]+)」").matcher(apiDetail);
         while(m.find()) {
-            for(String token:m.group(1).split("[・,、/]")) {
+            for(String token:m.group(1).split("[・,、]")) {
                 String trimmed=token.trim();
                 if(!trimmed.isEmpty())names.add(trimmed);
             }
