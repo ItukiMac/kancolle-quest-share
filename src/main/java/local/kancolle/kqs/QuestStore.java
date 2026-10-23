@@ -18,6 +18,8 @@ public final class QuestStore {
     private Integer reportedAccepted;
     private Integer reportedTotal;
     private Integer reportedPages;
+    private Integer allTabReportedTotal;
+    private Integer allTabReportedPages;
     private Instant lastAllTab;
     private String lastTab;
     private int acceptedEvents;
@@ -41,7 +43,7 @@ public final class QuestStore {
             if(!(data instanceof Map<?,?> detail)||!(detail.get("api_list") instanceof List<?> list))return false;
             int page=parseInt(params==null?null:params.get("api_page_no"),1);
             String tab=strip(params==null?"all":params.getOrDefault("api_tab_id","all"),20);
-            pages.put(tab+":"+page,now);lastList=now;lastTab=tab;
+            lastList=now;lastTab=tab;
             if ("0".equals(tab)) {
                 // Page 1 begins a new capture generation. Never mix previous pages.
                 if (page==1) {
@@ -49,16 +51,19 @@ public final class QuestStore {
                     allTabProgress.clear();
                     observedAllPages=0;
                     allTabHasUnnumberedPage=false;
+                    allTabReportedTotal=null;
+                    allTabReportedPages=null;
                     pages.keySet().removeIf(k->k.startsWith("0:"));
                 }
                 lastAllTab=now;
                 observedAllPages++;
+                pages.put(tab+":"+page,now);
                 if (params==null || !params.containsKey("api_page_no")) allTabHasUnnumberedPage=true;
             }
             Integer total=optionalNumber(detail.get("api_count"));
-            if(total!=null)reportedTotal=total;
+            if(total!=null) {reportedTotal=total;if("0".equals(tab))allTabReportedTotal=total;}
             Integer count=optionalNumber(detail.get("api_page_count"));
-            if(count!=null)reportedPages=count;
+            if(count!=null) {reportedPages=count;if("0".equals(tab))allTabReportedPages=count;}
             Integer reported=optionalNumber(detail.get("api_exec_count"));
             if(reported!=null)reportedAccepted=reported;
             for(Object obj:list){
@@ -98,8 +103,8 @@ public final class QuestStore {
         data.put("last_list_at", lastList==null?null:lastList.toString());
         data.put("last_all_tab_at", lastAllTab==null?null:lastAllTab.toString());
         data.put("last_tab_id", lastTab);
-        data.put("api_count", reportedTotal);
-        data.put("api_page_count", reportedPages);
+        data.put("api_count", allTabReportedTotal==null?reportedTotal:allTabReportedTotal);
+        data.put("api_page_count", allTabReportedPages==null?reportedPages:allTabReportedPages);
         data.put("api_exec_count", reportedAccepted);
         data.put("observed_page_keys", List.copyOf(pages.keySet()));
         data.put("observed_quest_events", acceptedEvents);
@@ -132,7 +137,7 @@ public final class QuestStore {
         }
         for(Integer id:actual.keySet())if(!allTabStates.containsKey(id)) extra.add(id);
         boolean allSeen=lastAllTab!=null;
-        boolean apiSizeMatches=reportedTotal!=null && reportedTotal==allTabStates.size();
+        boolean apiSizeMatches=allTabReportedTotal!=null && allTabReportedTotal==allTabStates.size();
         boolean notExpired=allSeen && java.time.Duration.between(lastAllTab,Instant.now()).toMinutes()<15;
         boolean noNewMutation=allSeen && (lastQuestMutation==null || !lastQuestMutation.isAfter(lastAllTab));
         // Game daily reset at 05:00 JST invalidates a previously captured snapshot.
@@ -152,7 +157,7 @@ public final class QuestStore {
         evidence.put("verified", "verified".equals(verdict));
         evidence.put("all_tab_snapshot_count",allTabStates.size());
         evidence.put("logbook_collection_count",actual.size());
-        evidence.put("api_reported_count",reportedTotal);
+        evidence.put("api_reported_count",allTabReportedTotal);
         evidence.put("api_count_matches_snapshot",apiSizeMatches);
         evidence.put("ids_missing_in_logbook",missing);
         evidence.put("ids_extra_in_logbook",extra);
@@ -161,7 +166,7 @@ public final class QuestStore {
         evidence.put("fresh_within_15_minutes",notExpired);
         evidence.put("same_game_day",sameGameDay);
         evidence.put("no_quest_mutation_since_capture",noNewMutation);
-        evidence.put("all_tab_page_count_reported",reportedPages);
+        evidence.put("all_tab_page_count_reported",allTabReportedPages);
         evidence.put("all_tab_page_numbers_unavailable",allTabHasUnnumberedPage);
         return evidence;
     }
