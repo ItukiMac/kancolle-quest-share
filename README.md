@@ -1,55 +1,45 @@
 # KQS – KanColle Quest Share
 
-**KQS Logbook Plugin** は、艦これの受注任務を航海日誌改（logbook-kai）からChatGPTへ共有する、非公式の独立プラグインです。
+KQS Logbook Plugin is an unofficial independent logbook-kai plugin for exporting **all currently available quests known to logbook-kai**, not only accepted quests.
 
-## 構成
+## Architecture
 
-```text
-艦これ (Chrome) → KLB Chrome Extension → KLB Logbook Plugin (127.0.0.1:8891)
-                                           ↓
-                              航海日誌改 ContentListenerSpi
-                                ├ 既存の処理
-                                └ KQS Logbook Plugin → コピー → ChatGPT
-```
+KanColle (Chrome) → existing KLB Chrome Extension → KLB Logbook Plugin → logbook-kai (existing UI and KQS independent observer).
 
-KLB Chrome拡張の追加インストールは不要で、CDP接続も増やしません。KLB本体・航海日誌改本体を変更せず、別JARとして導入します。
+No second Chrome debugger connection, no changes to KLB, and **no additional toolbar or button in the main window**.
 
-## 対応・制限
-- 航海日誌改 **25.0.8** と既存 KLB **1.0.0** を想定しています。
-- Java 21以上、JavaFX環境が必要です。Java 25.0.5 Fullは検証対象です。
-- 任務一覧、受注、解除、報酬受領のAPI通信のみを監視し、任務名・番号・段階進捗を整形します。
-- 任務一覧を未表示のページ・古い情報は不完全です。50%/80%はゲームの段階表示です。
-- Cookie、認証トークン、APIの生データはディスクへ保存しません。任務状態はメモリのみで、再起動により消えます。
-- ゲームサーバーへの追加リクエスト・自動操作・通信改変は行いません。
-- ChatGPTを開くボタンは情報をコピーするのみです。貼り付け・送信はユーザーが行います。
+## How to use
 
-## ビルド・テスト
+1. Open the game quest list, preferably **全て (ALL)**. This refreshes available, accepted and completed-but-unclaimed quest data.
+2. Right-click a quest entry or any part of the **任務** region in logbook-kai's main/mother-port quest panel.
+3. Select one of: **KQS：現在の全任務をJSONコピー**, **KQS：任務消化計画用のJSON＋依頼文をコピー**, **KQS：全任務JSONを別ウィンドウで表示**, **KQS：全任務JSONをファイル保存...**.
+4. Paste the JSON/prompt into ChatGPT. The plugin never sends it automatically.
 
-```sh
-export LOGBOOK_JAR=/path/to/logbook-kai.jar
-bash scripts/build.sh
-bash scripts/test.sh
-```
+Right-click within the quest area replaces the original upstream destructive **全て除去** right-click menu; other context menus are unaffected. Saving a JSON file requires an explicit path choice and refuses to overwrite an existing file.
 
-配布JAR名：`kqs-logbook-plugin-v0.1.0-rc.1.jar`（インストール時の推奨名：`kqs-logbook-plugin.jar`）。
+## Information contained in the JSON
 
-GitHub Actionsは固定の航海日誌改25.0.8をSHA-256照合してビルドし、テストを実施します。ビルド結果はActions artifactに保存されます。GitHub Releaseへの公開は未設定です。
+- ID, name, description, quest category, recurrence/API type, state (available/unaccepted, accepted, completed/unclaimed), 50%/80% progress *stage*, basic material rewards, bonus/invalid flags, reset-date estimate.
+- Where logbook-kai has a quest resource: objective sea areas, nodes, boss and victory ranks, counts, expedition names, fleet ship types/names, fleet ordering/composition filters, recurrence overrides and optional hints.
+- Timestamp and source, full-list ALL-tab observation and page counts, game-reported total and accepted count, coverage limitations.
+- Explicit null for unknown prerequisites, unlock chains, exact counters, choice reward items, and event deadlines.
 
-## 導入・復旧
+**All** means all game quests *currently available/unlocked and observed* in the local logbook-kai collection, not every quest in KanColle. Not-yet-unlocked quests and historically claimed rewards cannot be reconstructed from the current game API. Cache could be stale unless the current session observes the ALL tab. Conditions absent in logbook-kai's internal files must be looked up in wikiwiki.jp/kancolle and zekamashi.net.
 
-**現時点ではRelease Candidateであり、実機検証は未完了です。** CI成功だけで現用環境への導入安全性を保証しません。
+The optional ChatGPT prompt requests parallel sorties organized by area, overlapping quest requirements and compatible fleets; prioritizes limited-time and rare rewards; investigates follow-on quests; treats resource-only and rank-points-only rewards as low priority; and calls out missing information.
 
-航海日誌改を通常終了してから、既存のKLB JARを保持したまま、プラグインディレクトリへ別名のKQS JARを新規追加します。同名ファイルがある場合は上書きせず停止してください。
+## Build and test
 
-問題が発生した場合、新規追加したKQS JARのみを別フォルダーへ退避し、航海日誌改を再起動して元の環境に戻してください。旧KLB・旧Java・バックアップを削除しないでください。
+Java 21+ and logbook-kai 25.0.8:
 
-## プロジェクト情報
+    export LOGBOOK_JAR=/path/to/logbook-kai.jar
+    bash scripts/build.sh
+    bash scripts/test.sh
 
-- Product: **KQS – KanColle Quest Share**
-- Plugin: **KQS Logbook Plugin**
-- Repository: **ItukiMac/kancolle-quest-share**
-- Build filename: `kqs-logbook-plugin-v0.1.0-rc.1.jar`
-- Runtime filename: `kqs-logbook-plugin.jar`
-- License: MIT
+CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v0.2.0-rc.1.jar**; installed filename **kqs-logbook-plugin.jar**.
 
-本プロジェクトは艦これ、DMM GAMES、航海日誌改、KLBの公式プロジェクトではありません。詳細は[NOTICE.md](NOTICE.md)を参照してください。
+## Safe installation
+
+This is a **release candidate** pending actual GUI and game API verification. Keep existing KLB and Java backups. Exit logbook-kai normally before adding the JAR in plugins, without overwriting anything. Do not activate more than one version of KQS. If the GUI does not work, exit logbook-kai, move only the newly installed KQS JAR aside, and restart normally. Do not remove the working KLB.
+
+License: MIT. See NOTICE.md for independent-project acknowledgements.
