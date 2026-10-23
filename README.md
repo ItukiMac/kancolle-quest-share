@@ -22,6 +22,10 @@ Right-click within the quest area opens the KQS context menu. When right-clickin
 - ID, name, description, quest category, recurrence/API type, state (available/unaccepted, accepted, completed/unclaimed), 50%/80% progress *stage*, basic material rewards, bonus/invalid flags, reset-date estimate.
 - Where logbook-kai has a quest resource: objective sea areas, nodes, boss and victory ranks, counts, expedition names, fleet ship types/names, fleet ordering/composition filters, recurrence overrides and optional hints.
 - Timestamp and source, full-list ALL-tab observation and page counts, game-reported total and accepted count, coverage limitations.\n- **snapshot_verified** and **completeness.status**: latest ALL-tab API quest IDs, states and progress must match logbook-kai, API count must match, capture must be within 15 minutes and within the same 05:00-JST game day, and no quest mutations may have followed capture.\n- **condition_conflict_codes** flags API/local reset-period differences and possible mismatching fleet names. Local quest conditions are *advisory*, not authoritative; externally verify warnings.
+- **condition_coverage** summarizes how many of the currently visible quest records have local structured conditions, which IDs still lack them, and which ones need a condition check. This reports data availability rather than inventing missing objective or reward details.
+- Fleet-name warnings compare API-explicitly enumerated names (including recursively nested conditions), not generic prose such as “米英艦艇”. Remodel aliases separated by a slash are treated as alternatives instead of independent missing ships.
+- A verified snapshot also checks API quest **title, description, category and recurrence type**, whenever those fields are present, in addition to IDs/state/progress. Verification expires at 15 minutes and at the next 05:00 JST game-day boundary; clock rollback is treated as stale. If API reports the page count, every page must be observed.
+- This release candidate includes deterministic regression tests simulating both sides of the 05:00 JST boundary, the 15-minute expiration and stale title/category data.
 - Explicit null for unknown prerequisites, unlock chains, exact counters, choice reward items, and event deadlines.
 
 **All** means all game quests *currently available/unlocked and observed* in the local logbook-kai collection, not every quest in KanColle. Not-yet-unlocked quests and historically claimed rewards cannot be reconstructed from the current game API. Cache could be stale unless the current session observes the ALL tab. Conditions absent in logbook-kai's internal files must be looked up in wikiwiki.jp/kancolle and zekamashi.net.
@@ -36,7 +40,7 @@ Java 21+ and logbook-kai 25.0.8:
     bash scripts/build.sh
     bash scripts/test.sh
 
-CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v0.2.0-rc.2.jar**; installed filename **kqs-logbook-plugin.jar**.
+CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v0.2.0-rc.3.jar**; installed filename **kqs-logbook-plugin.jar**.
 
 ## Safe installation
 
