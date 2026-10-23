@@ -168,13 +168,13 @@ public final class QuestExporter {
             for(String name:explicit) {
                 if(name.endsWith("型") || name.endsWith("隊") || name.endsWith("艦"))continue;
                 compared++;
-                if(!localNames.stream().anyMatch(local->local.equals(name) ||
-                    local.contains(name) || name.contains(local)))missing++;
+                if(!localNames.stream().anyMatch(candidate->candidate.equals(name) ||
+                    candidate.contains(name) || name.contains(candidate)))missing++;
             }
             // Without any cross-match, the quotation might refer to
             // equipment/places rather than ship names: do not alert.
-            boolean overlap=localNames.stream().anyMatch(local->
-                explicit.stream().anyMatch(name->name.equals(local) || name.contains(local) || local.contains(name)));
+            boolean overlap=localNames.stream().anyMatch(candidate->
+                explicit.stream().anyMatch(name->name.equals(candidate) || name.contains(candidate) || candidate.contains(name)));
             if(overlap && compared>=2 && missing>0)
                 warnings.add("possible_fleet_name_conflict_check_api_detail");
         }
