@@ -99,6 +99,23 @@ public final class QuestExporterTest {
         check(warnings.contains("api_local_recurrence_conflict"),"period mismatch flagged");
         check(warnings.contains("possible_fleet_name_conflict_check_api_detail"),"fleet conflict flagged");
         check(QuestExporter.conditionWarnings(api,null).isEmpty(),"null condition safe");
+        QuestStore paged=new QuestStore();
+        String first="svdata={\"api_result\":1,\"api_data\":{\"api_count\":3,\"api_page_count\":2,\"api_list\":["+
+            "{\"api_no\":11,\"api_state\":1,\"api_progress_flag\":0},"+
+            "{\"api_no\":12,\"api_state\":2,\"api_progress_flag\":1}]}}";
+        String second="svdata={\"api_result\":1,\"api_data\":{\"api_count\":3,\"api_page_count\":2,\"api_list\":["+
+            "{\"api_no\":13,\"api_state\":3,\"api_progress_flag\":2}]}}";
+        check(paged.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","0","api_page_no","1"),first),"paged 1");
+        check(!Boolean.TRUE.equals(paged.validate(all).get("verified")),"page 1 must be incomplete");
+        check(paged.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","0","api_page_no","2"),second),"paged 2");
+        check(Boolean.TRUE.equals(paged.validate(all).get("verified")),"two pages collectively verified");
+        check(paged.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","1","api_page_no","1"),
+            "svdata={\"api_result\":1,\"api_data\":{\"api_count\":999,\"api_list\":[]}}"),"non-all tab");
+        check(Boolean.TRUE.equals(paged.validate(all).get("verified")),"non-all tab cannot corrupt all-tab count");
+        check(paged.accept("/kcsapi/api_get_member/questlist",Map.of("api_tab_id","0","api_page_no","1"),first),"new generation");
+        check(!Boolean.TRUE.equals(paged.validate(all).get("verified")),"new page1 clears stale page2");
+        check(((Number)paged.captureEvidence().get("observed_all_tab_quest_ids")).intValue()==2,"page1 reset");
+
         System.out.println("QuestExporter tests PASS");
     }
 }
