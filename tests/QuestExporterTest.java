@@ -41,6 +41,8 @@ public final class QuestExporterTest {
         Map<String,Object> before = QuestExporter.build(store, all, false);
         JsonNode initial = new ObjectMapper().readTree(QuestExporter.encode(before));
         check(initial.path("quests").size()==3, "not only accepted tasks");
+        check(initial.path("condition_coverage").path("local_condition_missing").asInt()==3,"condition coverage missing");
+        check(initial.path("condition_coverage").path("local_condition_warning_count").asInt()==0,"condition coverage warnings");
         check(initial.path("counts").path("available_unaccepted").asInt()==1,"unaccepted count");
         check(initial.path("counts").path("accepted").asInt()==1,"accepted count");
         check(initial.path("counts").path("completed_unclaimed").asInt()==1,"completed count");
