@@ -18,6 +18,12 @@ import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Menu;
+import javafx.scene.control.ButtonType;
+import javafx.scene.layout.HBox;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import logbook.bean.AppQuestCollection;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TitledPane;
@@ -39,6 +45,7 @@ import logbook.plugin.lifecycle.StartUp;
  */
 public final class KqsLogbookPlugin implements ContentListenerSpi, StartUp {
     private static final QuestStore STORE = new QuestStore();
+    private static final AtomicBoolean EXPORTING = new AtomicBoolean(false);
     private static final String FILTER_PROPERTY = "kqs.quest.contextMenuFilter.v2";
 
     @Override
@@ -97,7 +104,7 @@ public final class KqsLogbookPlugin implements ContentListenerSpi, StartUp {
                 // QuestPane contains an upstream "全て除去" context menu. Consume only
                 // quest-area events, preventing destructive operations by mistake.
                 event.consume();
-                showMenu(window, event.getScreenX(), event.getScreenY());
+                showMenu(window, event.getScreenX(), event.getScreenY(), isQuestItem(node));
             });
             root.getProperties().put(FILTER_PROPERTY, true);
         }
@@ -113,12 +120,19 @@ public final class KqsLogbookPlugin implements ContentListenerSpi, StartUp {
         return false;
     }
 
-    private static void showMenu(Window window, double x, double y) {
+    private static boolean isQuestItem(Node node) {
+        for(Node n=node;n!=null;n=n.getParent()) {
+            if(n.getClass().getName().equals("logbook.internal.gui.QuestPane"))return true;
+        }
+        return false;
+    }
+
+    private static void showMenu(Window window, double x, double y, boolean showOriginal) {
         MenuItem copyJson = new MenuItem("KQS：現在の全任務をJSONコピー");
-        copyJson.setOnAction(e -> copy(QuestExporter.json(STORE), window));
+        copyJson.setOnAction(e -> exportAsync(window, QuestExporter::json, text->copy(text,window)));
 
         MenuItem copyPrompt = new MenuItem("KQS：任務消化計画用のJSON＋依頼文をコピー");
-        copyPrompt.setOnAction(e -> copy(QuestExporter.prompt(STORE), window));
+        copyPrompt.setOnAction(e -> exportAsync(window, QuestExporter::prompt, text->copy(text,window)));
 
         MenuItem preview = new MenuItem("KQS：全任務JSONを別ウィンドウで表示");
         preview.setOnAction(e -> preview(window));
@@ -126,7 +140,50 @@ public final class KqsLogbookPlugin implements ContentListenerSpi, StartUp {
         MenuItem save = new MenuItem("KQS：全任務JSONをファイル保存...");
         save.setOnAction(e -> save(window));
 
-        new ContextMenu(copyJson, copyPrompt, preview, save).show(window, x, y);
+        ContextMenu menu=new ContextMenu(copyJson,copyPrompt,preview,save);
+        if(showOriginal) {
+            Menu original=new Menu("航海日誌改（元の操作）");
+            MenuItem clear=new MenuItem("全て除去...（確認あり）");
+            clear.setOnAction(e->confirmClear(window));
+            original.getItems().add(clear);
+            menu.getItems().add(original);
+        }
+        menu.show(window, x, y);
+    }
+
+    private static void confirmClear(Window owner) {
+        Alert alert=new Alert(Alert.AlertType.CONFIRMATION,
+            "航海日誌改に記録された任務一覧を全て除去します。\nゲームの任務は変更されません。実行しますか？",
+            ButtonType.YES,ButtonType.NO);
+        alert.setTitle("航海日誌改：全て除去");
+        alert.setHeaderText("既存操作の確認");
+        if(owner!=null)alert.initOwner(owner);
+        if(alert.showAndWait().filter(ButtonType.YES::equals).isPresent())
+            AppQuestCollection.get().getQuest().clear();
+    }
+
+    private static void exportAsync(Window owner, java.util.function.Function<QuestStore,String> generator,
+                                    Consumer<String> onSuccess) {
+        if(!EXPORTING.compareAndSet(false,true)) {
+            message(owner,"KQS","別のJSON生成処理を実行中です。",Alert.AlertType.INFORMATION);
+            return;
+        }
+        Thread worker=new Thread(()-> {
+            try {
+                String value=generator.apply(STORE);
+                Platform.runLater(()-> {
+                    EXPORTING.set(false);
+                    onSuccess.accept(value);
+                });
+            } catch(Exception error) {
+                Platform.runLater(()-> {
+                    EXPORTING.set(false);
+                    message(owner,"KQS","JSON生成に失敗: "+error.getClass().getSimpleName(),Alert.AlertType.ERROR);
+                });
+            }
+        },"KQS-Export");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private static void copy(String text, Window owner) {
@@ -141,13 +198,14 @@ public final class KqsLogbookPlugin implements ContentListenerSpi, StartUp {
         Stage stage = new Stage();
         if (owner != null) stage.initOwner(owner);
         stage.setTitle("KQS Logbook Plugin | 全任務JSON");
-        TextArea area = new TextArea(QuestExporter.json(STORE));
+        TextArea area = new TextArea("JSONを生成しています...");
+        exportAsync(stage, QuestExporter::json, area::setText);
         area.setEditable(false);
         area.setWrapText(false);
         Button copy = new Button("JSONをコピー");
         copy.setOnAction(e -> copy(area.getText(), stage));
         Button refresh = new Button("最新状態を再取得（表示更新）");
-        refresh.setOnAction(e -> area.setText(QuestExporter.json(STORE)));
+        refresh.setOnAction(e -> exportAsync(stage, QuestExporter::json, area::setText));
         VBox layout = new VBox(8, new javafx.scene.layout.HBox(8, copy, refresh), area);
         layout.setStyle("-fx-padding:12");
         VBox.setVgrow(area, javafx.scene.layout.Priority.ALWAYS);
@@ -164,14 +222,17 @@ public final class KqsLogbookPlugin implements ContentListenerSpi, StartUp {
         java.io.File destination = chooser.showSaveDialog(owner);
         if (destination == null) return;
         Path path = destination.toPath();
-        try {
-            // Explicitly refuse overwriting an existing file.
-            Files.writeString(path, QuestExporter.json(STORE), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-        } catch (java.nio.file.FileAlreadyExistsException e) {
-            message(owner, "KQS", "既存ファイルは上書きしません。別のファイル名を指定してください。", Alert.AlertType.WARNING);
-        } catch (Exception e) {
-            message(owner, "KQS", "保存に失敗しました: " + e.getClass().getSimpleName(), Alert.AlertType.ERROR);
-        }
+        exportAsync(owner,QuestExporter::json,text->{
+            try {
+                // CREATE_NEW refuses to overwrite existing files, even with a stale dialog.
+                Files.writeString(path,text,StandardCharsets.UTF_8,StandardOpenOption.CREATE_NEW);
+                message(owner,"KQS","JSONファイルを保存しました。",Alert.AlertType.INFORMATION);
+            } catch(java.nio.file.FileAlreadyExistsException ex) {
+                message(owner,"KQS","既存ファイルは上書きしません。",Alert.AlertType.WARNING);
+            } catch(Exception ex) {
+                message(owner,"KQS","保存に失敗しました: "+ex.getClass().getSimpleName(),Alert.AlertType.ERROR);
+            }
+        });
     }
 
     private static void message(Window owner, String title, String msg, Alert.AlertType type) {
