@@ -15,7 +15,7 @@ for bin in javac jar; do command -v "$bin" >/dev/null; done
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$ROOT/dist" "$TMP/classes/META-INF"
-javac --release 21 -proc:none -encoding UTF-8 -cp "$LOGBOOK_JAR" -d "$TMP/classes" "$ROOT/src/main/java/local/kancolle/kqs/QuestStore.java" "$ROOT/src/main/java/local/kancolle/kqs/KqsLogbookPlugin.java"
+javac --release 21 -proc:none -encoding UTF-8 -cp "$LOGBOOK_JAR" -d "$TMP/classes" "$ROOT/src/main/java/local/kancolle/kqs/QuestStore.java" "$ROOT/src/main/java/local/kancolle/kqs/QuestExporter.java" "$ROOT/src/main/java/local/kancolle/kqs/KqsLogbookPlugin.java"
 cp -R "$ROOT/src/main/resources/." "$TMP/classes/"
 cp "$ROOT/LICENSE" "$TMP/classes/META-INF/LICENSE"
 cp "$ROOT/NOTICE.md" "$TMP/classes/META-INF/NOTICE.md"

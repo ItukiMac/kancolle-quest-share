@@ -8,8 +8,20 @@ public final class QuestStore {
     private record Quest(int id,String title,String detail,int state,int progress,Instant seen) {}
     private final Map<Integer,Quest> quests=new LinkedHashMap<>();
     private final Map<String,Instant> pages=new LinkedHashMap<>();
+    // Raw API snapshot, used only to validate the logbook-kai AppQuestCollection.
+    private final Map<Integer,Integer> allTabStates=new LinkedHashMap<>();
+    private final Map<Integer,Integer> allTabProgress=new LinkedHashMap<>();
+    private Instant lastQuestMutation;
+    private int observedAllPages;
+    private boolean allTabHasUnnumberedPage;
     private Instant lastUpdate,lastList;
     private Integer reportedAccepted;
+    private Integer reportedTotal;
+    private Integer reportedPages;
+    private Integer allTabReportedTotal;
+    private Integer allTabReportedPages;
+    private Instant lastAllTab;
+    private String lastTab;
     private int acceptedEvents;
 
     public synchronized boolean accept(String path,Map<String,String> params,String body) {
@@ -31,7 +43,27 @@ public final class QuestStore {
             if(!(data instanceof Map<?,?> detail)||!(detail.get("api_list") instanceof List<?> list))return false;
             int page=parseInt(params==null?null:params.get("api_page_no"),1);
             String tab=strip(params==null?"all":params.getOrDefault("api_tab_id","all"),20);
-            pages.put(tab+":"+page,now);lastList=now;
+            lastList=now;lastTab=tab;
+            if ("0".equals(tab)) {
+                // Page 1 begins a new capture generation. Never mix previous pages.
+                if (page==1) {
+                    allTabStates.clear();
+                    allTabProgress.clear();
+                    observedAllPages=0;
+                    allTabHasUnnumberedPage=false;
+                    allTabReportedTotal=null;
+                    allTabReportedPages=null;
+                    pages.keySet().removeIf(k->k.startsWith("0:"));
+                }
+                lastAllTab=now;
+                observedAllPages++;
+                pages.put(tab+":"+page,now);
+                if (params==null || !params.containsKey("api_page_no")) allTabHasUnnumberedPage=true;
+            }
+            Integer total=optionalNumber(detail.get("api_count"));
+            if(total!=null) {reportedTotal=total;if("0".equals(tab))allTabReportedTotal=total;}
+            Integer count=optionalNumber(detail.get("api_page_count"));
+            if(count!=null) {reportedPages=count;if("0".equals(tab))allTabReportedPages=count;}
             Integer reported=optionalNumber(detail.get("api_exec_count"));
             if(reported!=null)reportedAccepted=reported;
             for(Object obj:list){
@@ -42,10 +74,16 @@ public final class QuestStore {
                 String description=strip(q.get("api_detail"),700);
                 if(title.isEmpty())title=old==null?"任務 #"+id:old.title;
                 if(description.isEmpty()&&old!=null)description=old.detail;
-                quests.put(id,new Quest(id,title,description,number(q.get("api_state"),old==null?1:old.state),
-                    number(q.get("api_progress_flag"),old==null?0:old.progress),now));
+                int state=number(q.get("api_state"),old==null?1:old.state);
+                int progress=number(q.get("api_progress_flag"),old==null?0:old.progress);
+                quests.put(id,new Quest(id,title,description,state,progress,now));
+                if ("0".equals(tab)) {
+                    allTabStates.put(id,state);
+                    allTabProgress.put(id,progress);
+                }
             }
         }else{
+            lastQuestMutation=now;
             int id=parseInt(params==null?null:params.get("api_quest_id"),-1);
             if(id<1||id>9_999_999)return false;
             Quest prev=quests.getOrDefault(id,new Quest(id,"任務 #"+id,"",1,0,now));
@@ -56,6 +94,81 @@ public final class QuestStore {
         if(quests.size()>400)quests.values().stream().filter(q->q.state!=2&&q.state!=3)
             .min(Comparator.comparing(Quest::seen)).ifPresent(q->quests.remove(q.id));
         return true;
+    }
+
+    public synchronized Map<String,Object> captureEvidence() {
+        Map<String,Object> data=new LinkedHashMap<>();
+        data.put("quest_list_observed", lastList!=null);
+        data.put("all_tab_observed_this_session", lastAllTab!=null);
+        data.put("last_list_at", lastList==null?null:lastList.toString());
+        data.put("last_all_tab_at", lastAllTab==null?null:lastAllTab.toString());
+        data.put("last_tab_id", lastTab);
+        data.put("api_count", allTabReportedTotal==null?reportedTotal:allTabReportedTotal);
+        data.put("api_page_count", allTabReportedPages==null?reportedPages:allTabReportedPages);
+        data.put("api_exec_count", reportedAccepted);
+        data.put("observed_page_keys", List.copyOf(pages.keySet()));
+        data.put("observed_quest_events", acceptedEvents);
+        data.put("observed_all_tab_quest_ids", allTabStates.size());
+        data.put("observed_all_tab_pages", observedAllPages);
+        data.put("all_tab_page_number_missing", allTabHasUnnumberedPage);
+        data.put("last_quest_mutation_at", lastQuestMutation==null?null:lastQuestMutation.toString());
+        return data;
+    }
+    /**
+     * Evaluate the raw game ALL-tab snapshot against the logbook-kai collection.
+     * Never report verified without ID + state matches and bounded freshness.
+     */
+    public synchronized Map<String,Object> validate(Collection<logbook.bean.AppQuest> apps) {
+        Map<Integer,Integer> actual=new LinkedHashMap<>();
+        Map<Integer,Integer> progress=new LinkedHashMap<>();
+        for (logbook.bean.AppQuest app:apps) {
+            if(app==null || app.getQuest()==null || app.getQuest().getNo()==null) continue;
+            logbook.bean.QuestList.Quest q=app.getQuest();
+            actual.put(q.getNo(), q.getState());
+            progress.put(q.getNo(), q.getProgressFlag());
+        }
+        List<Integer> missing=new ArrayList<>();
+        List<Integer> extra=new ArrayList<>();
+        List<Integer> changed=new ArrayList<>();
+        for (Integer id:allTabStates.keySet()) {
+            if(!actual.containsKey(id)) missing.add(id);
+            else if(!Objects.equals(actual.get(id),allTabStates.get(id)) ||
+                    !Objects.equals(progress.get(id),allTabProgress.get(id))) changed.add(id);
+        }
+        for(Integer id:actual.keySet())if(!allTabStates.containsKey(id)) extra.add(id);
+        boolean allSeen=lastAllTab!=null;
+        boolean apiSizeMatches=allTabReportedTotal!=null && allTabReportedTotal==allTabStates.size();
+        boolean notExpired=allSeen && java.time.Duration.between(lastAllTab,Instant.now()).toMinutes()<15;
+        boolean noNewMutation=allSeen && (lastQuestMutation==null || !lastQuestMutation.isAfter(lastAllTab));
+        // Game daily reset at 05:00 JST invalidates a previously captured snapshot.
+        java.time.ZoneId jst=java.time.ZoneId.of("Asia/Tokyo");
+        boolean sameGameDay=allSeen &&
+            lastAllTab.atZone(jst).minusHours(5).toLocalDate()
+                .equals(Instant.now().atZone(jst).minusHours(5).toLocalDate());
+        String verdict;
+        if (!allSeen) verdict="not_observed";
+        else if (!apiSizeMatches) verdict="incomplete_api_snapshot";
+        else if(!missing.isEmpty() || !extra.isEmpty() || !changed.isEmpty()) verdict="logbook_api_mismatch";
+        else if(!noNewMutation) verdict="mutation_since_capture";
+        else if(!notExpired || !sameGameDay) verdict="stale";
+        else verdict="verified";
+        Map<String,Object> evidence=new LinkedHashMap<>();
+        evidence.put("status",verdict);
+        evidence.put("verified", "verified".equals(verdict));
+        evidence.put("all_tab_snapshot_count",allTabStates.size());
+        evidence.put("logbook_collection_count",actual.size());
+        evidence.put("api_reported_count",allTabReportedTotal);
+        evidence.put("api_count_matches_snapshot",apiSizeMatches);
+        evidence.put("ids_missing_in_logbook",missing);
+        evidence.put("ids_extra_in_logbook",extra);
+        evidence.put("ids_state_or_progress_mismatch",changed);
+        evidence.put("freshness_max_minutes",15);
+        evidence.put("fresh_within_15_minutes",notExpired);
+        evidence.put("same_game_day",sameGameDay);
+        evidence.put("no_quest_mutation_since_capture",noNewMutation);
+        evidence.put("all_tab_page_count_reported",allTabReportedPages);
+        evidence.put("all_tab_page_numbers_unavailable",allTabHasUnnumberedPage);
+        return evidence;
     }
 
     public synchronized int activeCount(){
