@@ -157,19 +157,49 @@ public final class QuestExporter {
                 && !period.equals("unknown") && !localPeriod.equals(period)) {
             warnings.add("api_local_recurrence_conflict");
         }
-        // Flag an ambiguous name-list discrepancy rather than asserting the
-        // local fleet rule is wrong: remodel names or shorthand can differ.
+        // Compare only when the API explicitly enumerates ship names.
+        // Generic descriptions such as "米英艦艇" are not fleet name lists.
         Object filter=local.get("filter");
         if(filter instanceof Map<?,?> fm && fm.get("fleet") instanceof Map<?,?> fleet) {
-            String detail=clean(api.getDetail());
-            if(fleet.get("ship_names") instanceof Collection<?> names) {
-                int unmentioned=0;
-                for(Object name:names)if(name instanceof String str && !detail.contains(str))unmentioned++;
-                if(!names.isEmpty() && unmentioned>0)
-                    warnings.add("possible_fleet_name_conflict_check_api_detail");
+            java.util.Set<String> localNames=new java.util.LinkedHashSet<>();
+            collectShipNames(fleet,localNames,0);
+            java.util.Set<String> explicit=quotedNames(clean(api.getDetail()));
+            int compared=0, missing=0;
+            for(String name:explicit) {
+                if(name.endsWith("型") || name.endsWith("隊") || name.endsWith("艦"))continue;
+                compared++;
+                if(!localNames.stream().anyMatch(local->local.equals(name) ||
+                    local.contains(name) || name.contains(local)))missing++;
             }
+            // Without any cross-match, the quotation might refer to
+            // equipment/places rather than ship names: do not alert.
+            boolean overlap=localNames.stream().anyMatch(local->
+                explicit.stream().anyMatch(name->name.equals(local) || name.contains(local) || local.contains(name)));
+            if(overlap && compared>=2 && missing>0)
+                warnings.add("possible_fleet_name_conflict_check_api_detail");
         }
         return warnings;
+    }
+
+    private static void collectShipNames(Map<?,?> fleet,java.util.Set<String> names,int depth) {
+        if(depth>16 || fleet==null)return;
+        Object list=fleet.get("ship_names");
+        if(list instanceof Collection<?> col)for(Object n:col)if(n instanceof String str && !str.isBlank())names.add(str);
+        Object children=fleet.get("conditions");
+        if(children instanceof Collection<?> col)
+            for(Object child:col)if(child instanceof Map<?,?> map)collectShipNames(map,names,depth+1);
+    }
+
+    private static java.util.Set<String> quotedNames(String apiDetail) {
+        java.util.Set<String> names=new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher m=java.util.regex.Pattern.compile("「([^」]+)」").matcher(apiDetail);
+        while(m.find()) {
+            for(String token:m.group(1).split("[・,、/]")) {
+                String trimmed=token.trim();
+                if(!trimmed.isEmpty())names.add(trimmed);
+            }
+        }
+        return names;
     }
 
     private static String canonicalReset(Object raw) {
