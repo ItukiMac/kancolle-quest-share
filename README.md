@@ -15,13 +15,13 @@ No second Chrome debugger connection, no changes to KLB, and **no additional too
 3. Select one of: **KQS：現在の全任務をJSONコピー**, **KQS：任務消化計画用のJSON＋依頼文をコピー**, **KQS：全任務JSONを別ウィンドウで表示**, **KQS：全任務JSONをファイル保存...**.
 4. Paste the JSON/prompt into ChatGPT. The plugin never sends it automatically.
 
-Right-click within the quest area replaces the original upstream destructive **全て除去** right-click menu; other context menus are unaffected. Saving a JSON file requires an explicit path choice and refuses to overwrite an existing file.
+Right-click within the quest area opens the KQS context menu. When right-clicking a quest item, the original **全て除去** action remains available under **航海日誌改（元の操作）**, now protected by a confirmation dialog; other context menus are unaffected. JSON generation runs on a daemon worker so it does not block JavaFX rendering. Saving a JSON file requires an explicit path choice and refuses to overwrite an existing file.
 
 ## Information contained in the JSON
 
 - ID, name, description, quest category, recurrence/API type, state (available/unaccepted, accepted, completed/unclaimed), 50%/80% progress *stage*, basic material rewards, bonus/invalid flags, reset-date estimate.
 - Where logbook-kai has a quest resource: objective sea areas, nodes, boss and victory ranks, counts, expedition names, fleet ship types/names, fleet ordering/composition filters, recurrence overrides and optional hints.
-- Timestamp and source, full-list ALL-tab observation and page counts, game-reported total and accepted count, coverage limitations.
+- Timestamp and source, full-list ALL-tab observation and page counts, game-reported total and accepted count, coverage limitations.\n- **snapshot_verified** and **completeness.status**: latest ALL-tab API quest IDs, states and progress must match logbook-kai, API count must match, capture must be within 15 minutes and within the same 05:00-JST game day, and no quest mutations may have followed capture.\n- **condition_conflict_codes** flags API/local reset-period differences and possible mismatching fleet names. Local quest conditions are *advisory*, not authoritative; externally verify warnings.
 - Explicit null for unknown prerequisites, unlock chains, exact counters, choice reward items, and event deadlines.
 
 **All** means all game quests *currently available/unlocked and observed* in the local logbook-kai collection, not every quest in KanColle. Not-yet-unlocked quests and historically claimed rewards cannot be reconstructed from the current game API. Cache could be stale unless the current session observes the ALL tab. Conditions absent in logbook-kai's internal files must be looked up in wikiwiki.jp/kancolle and zekamashi.net.
@@ -36,7 +36,7 @@ Java 21+ and logbook-kai 25.0.8:
     bash scripts/build.sh
     bash scripts/test.sh
 
-CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v0.2.0-rc.1.jar**; installed filename **kqs-logbook-plugin.jar**.
+CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v0.2.0-rc.2.jar**; installed filename **kqs-logbook-plugin.jar**.
 
 ## Safe installation
 
