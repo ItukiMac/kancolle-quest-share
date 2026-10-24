@@ -21,7 +21,9 @@ Right-click within the quest area opens the KQS context menu. When right-clickin
 
 - ID, name, description, quest category, recurrence/API type, state (available/unaccepted, accepted, completed/unclaimed), 50%/80% progress *stage*, basic material rewards, bonus/invalid flags, reset-date estimate.
 - Where logbook-kai has a quest resource: objective sea areas, nodes, boss and victory ranks, counts, expedition names, fleet ship types/names, fleet ordering/composition filters, recurrence overrides and optional hints.
-- Timestamp and source, full-list ALL-tab observation and page counts, game-reported total and accepted count, coverage limitations.\n- **snapshot_verified** and **completeness.status**: latest ALL-tab API quest IDs, states and progress must match logbook-kai, API count must match, capture must be within 15 minutes and within the same 05:00-JST game day, and no quest mutations may have followed capture.\n- **condition_conflict_codes** flags API/local reset-period differences and possible mismatching fleet names. Local quest conditions are *advisory*, not authoritative; externally verify warnings.
+- Timestamp and source, full-list ALL-tab observation and page counts, game-reported total and accepted count, coverage limitations.
+- **snapshot_verified** and **completeness.status**: latest ALL-tab API quest IDs, states and progress must match logbook-kai, API count must match, capture must be within 15 minutes and within the same 05:00-JST game day, and no quest mutations may have followed capture.
+- **condition_conflict_codes** flags API/local reset-period differences and possible mismatching fleet names. Local quest conditions are *advisory*, not authoritative; externally verify warnings.
 - **condition_coverage** summarizes how many of the currently visible quest records have local structured conditions, which IDs still lack them, and which ones need a condition check. This reports data availability rather than inventing missing objective or reward details.
 - Fleet-name warnings compare API-explicitly enumerated names (including recursively nested conditions), not generic prose such as “米英艦艇”. Remodel aliases separated by a slash are treated as alternatives instead of independent missing ships.
 - A verified snapshot also checks API quest **title, description, category and recurrence type**, whenever those fields are present, in addition to IDs/state/progress. Verification expires at 15 minutes and at the next 05:00 JST game-day boundary; clock rollback is treated as stale. If API reports the page count, every page must be observed.
@@ -40,10 +42,16 @@ Java 21+ and logbook-kai 25.0.8:
     bash scripts/build.sh
     bash scripts/test.sh
 
-CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v0.2.0-rc.3.jar**; installed filename **kqs-logbook-plugin.jar**.
+CI compiles using the verified logbook-kai v25.0.8 distribution and provides an artifact. The standalone JAR is named **kqs-logbook-plugin-v1.0.0.jar**; installed filename **kqs-logbook-plugin.jar**.
 
 ## Safe installation
 
-This is a **release candidate** pending actual GUI and game API verification. Keep existing KLB and Java backups. Exit logbook-kai normally before adding the JAR in plugins, without overwriting anything. Do not activate more than one version of KQS. If the GUI does not work, exit logbook-kai, move only the newly installed KQS JAR aside, and restart normally. Do not remove the working KLB.
+Obtain the release JAR and its `SHA256SUMS` from [Releases](https://github.com/ItukiMac/kancolle-quest-share/releases/tag/v1.0.0); verify its SHA256 before installation.
+
+v1.0.0 is the first stable release after Java 25/Linux Mint GUI and game API verification (54/54 currently available quests matching). Keep existing KLB and Java backups. Exit logbook-kai normally before adding the JAR in plugins, without overwriting anything. Do not activate more than one version of KQS. If the GUI does not work, exit logbook-kai, move only the newly installed KQS JAR aside, and restart normally. Do not remove the working KLB.
 
 License: MIT. See NOTICE.md for independent-project acknowledgements.
+
+## Project boundary
+
+KQS only exports observed quest data (game API plus explicitly labeled logbook-kai local conditions). Quest priorities, sortie plans, following prerequisites and current reward assessments belong in ChatGPT. No wiki database, reward database, quest planner, scraper or automatic data upload is included.
