@@ -1,0 +1,61 @@
+name: KQS Release
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  release:
+    if: github.repository == 'ItukiMac/kancolle-quest-share'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(cat VERSION)"
+          if [[ "$VERSION" == "1.0.0" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-java@v4
+        if: steps.version.outputs.publish == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Acquire verified logbook-kai 25.0.8
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .upstream
+          curl -fLsS --retry 3 -o .upstream/logbook.zip             https://github.com/sakura0689/logbook-kai/releases/download/v25.0.8/logbook-kai_25.0.8.zip
+          echo 'd24b2aba8658b1acc6f4081604ce4280091cc714519ada957f9eaa6d240943c5  .upstream/logbook.zip' | sha256sum -c -
+          unzip -q .upstream/logbook.zip -d .upstream
+          JAR="$(find .upstream -name logbook-kai.jar -type f -print -quit)"
+          test -n "$JAR"
+          echo "LOGBOOK_JAR=$JAR" >> "$GITHUB_ENV"
+      - name: Build and test
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build.sh
+          bash scripts/test.sh
+          test -f dist/kqs-logbook-plugin-v1.0.0.jar
+          (cd dist && sha256sum kqs-logbook-plugin-v1.0.0.jar > SHA256SUMS)
+      - name: Publish immutable release if absent
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            echo "v1.0.0 already exists; will not overwrite"
+            exit 0
+          fi
+          gh release create v1.0.0             dist/kqs-logbook-plugin-v1.0.0.jar dist/SHA256SUMS             --target "$GITHUB_SHA" --title "KQS Logbook Plugin v1.0.0"             --notes-file RELEASE_NOTES.md
