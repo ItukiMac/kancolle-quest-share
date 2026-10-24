@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .upstream
-          curl -fLsS --retry 3 -o .upstream/logbook.zip             https://github.com/sakura0689/logbook-kai/releases/download/v25.0.8/logbook-kai_25.0.8.zip
+          curl -fLsS --retry 3 -o .upstream/logbook.zip "https://github.com/sakura0689/logbook-kai/releases/download/v25.0.8/logbook-kai_25.0.8.zip"
           echo 'd24b2aba8658b1acc6f4081604ce4280091cc714519ada957f9eaa6d240943c5  .upstream/logbook.zip' | sha256sum -c -
           unzip -q .upstream/logbook.zip -d .upstream
           JAR="$(find .upstream -name logbook-kai.jar -type f -print -quit)"
@@ -58,4 +58,4 @@ jobs:
             echo "v1.0.0 already exists; will not overwrite"
             exit 0
           fi
-          gh release create v1.0.0             dist/kqs-logbook-plugin-v1.0.0.jar dist/SHA256SUMS             --target "$GITHUB_SHA" --title "KQS Logbook Plugin v1.0.0"             --notes-file RELEASE_NOTES.md
+          gh release create v1.0.0 dist/kqs-logbook-plugin-v1.0.0.jar dist/SHA256SUMS --target "$GITHUB_SHA" --title "KQS Logbook Plugin v1.0.0" --notes-file RELEASE_NOTES.md
