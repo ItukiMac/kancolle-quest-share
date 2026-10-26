@@ -1,0 +1,123 @@
+name: KQS R2 checked source integration (tooling only)
+on:
+  push:
+    branches: ['maintenance/r2-integration-worker-20261026']
+permissions:
+  contents: write
+concurrency:
+  group: kqs-r2-20261026
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'ItukiMac/kancolle-quest-share'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE: dca163a0db0e742b5b4705d8d36b8f7026faefa0
+      TARGET: maintenance/r2-generation-export-20261026
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: payload
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: candidate
+          ref: dca163a0db0e742b5b4705d8d36b8f7026faefa0
+          persist-credentials: true
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: ItukiMac/logbook-kai-maintained
+          ref: 86e3764ee69b3871a33f658d513e1ec7c36755fe
+          path: host
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: ItukiMac/logbook-kai-maintained
+          ref: 4f310942b231154d0d37d31d93a7a58f3793cf11
+          path: legacy
+          persist-credentials: false
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: host/pom.xml
+      - name: Apply and verify five exact source edits on the isolated pinned checkout
+        working-directory: candidate
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$BASE"
+          test -z "$(git status --porcelain)"
+          test "$(git ls-remote origin refs/heads/$TARGET | cut -f1)" = "$BASE"
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,os
+          from pathlib import Path
+          encoded=Path('../payload/.maintenance-transfers/r2/kqs.txt').read_text()
+          assert hashlib.sha256(encoded.encode()).hexdigest()=='4e4ca13f43c8c910874087537f80d1028ece8687b0c56d02f9f8f444037e1e09'
+          dec=lzma.LZMADecompressor(memlimit=64*1024*1024)
+          raw=dec.decompress(base64.b64decode(encoded,validate=True),max_length=30001)
+          assert len(raw)<=30000 and dec.eof and not dec.unused_data
+          spec=json.loads(raw)
+          allowed={'VERSION','scripts/test.sh','src/main/java/local/kancolle/kqs/QuestExporter.java','docs/GENERATION_CONTRACT.md','tests/QuestGenerationTest.java'}
+          assert spec['base']==os.environ['BASE'] and len(spec['files'])==5
+          assert {x['p'] for x in spec['files']}==allowed
+          digest=hashlib.sha256(); output={}
+          for item in spec['files']:
+              p=Path(item['p']); assert not p.is_symlink()
+              assert not p.exists() if item['a'] else p.is_file()
+              lines=[] if item['a'] else p.read_bytes().decode().splitlines(True)
+              previous=0
+              for start,end,text in item['e']:
+                  assert previous<=start<=end<=len(lines); previous=end
+              for start,end,text in reversed(item['e']): lines[start:end]=text.splitlines(True)
+              data=''.join(lines).encode();output[str(p)]=data
+              digest.update(str(p).encode()+b'\0'+data+b'\0')
+          assert digest.hexdigest()==spec['result_sha256']=='320010d0f2af4876b10879bd377efd925c2e9d423dc7a63aedf9c74d6af8af88'
+          for name,data in output.items():
+              p=Path(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+          Path('../verified-paths.json').write_text(json.dumps(list(output)))
+          print('VERIFIED_KQS_SOURCE',digest.hexdigest())
+          PY
+          git diff --check
+      - name: Build new and legacy host JARs without installation or release
+        run: |
+          mvn -f host/pom.xml --batch-mode --no-transfer-progress -DskipTests package
+          mvn -f legacy/pom.xml --batch-mode --no-transfer-progress -DskipTests package
+      - name: Verify new KQS with new host and legacy compatibility using the same plugin binary
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          export LOGBOOK_JAR="$GITHUB_WORKSPACE/host/target/logbook-kai.jar"
+          bash scripts/build.sh
+          bash scripts/test.sh | tee evidence/new-host.log
+          export LOGBOOK_JAR="$GITHUB_WORKSPACE/legacy/target/logbook-kai.jar"
+          bash scripts/test.sh | tee evidence/legacy-host.log
+      - name: Save only tested source in a non-force dedicated branch commit
+        working-directory: candidate
+        run: |
+          set -eu
+          test "$(git ls-remote origin refs/heads/$TARGET | cut -f1)" = "$BASE"
+          python3 - <<'PY'
+          import hashlib,json,subprocess
+          from pathlib import Path
+          paths=json.loads(Path('../verified-paths.json').read_text());h=hashlib.sha256()
+          for p in paths:h.update(p.encode()+b'\0'+Path(p).read_bytes()+b'\0')
+          assert h.hexdigest()=='320010d0f2af4876b10879bd377efd925c2e9d423dc7a63aedf9c74d6af8af88'
+          subprocess.run(['git','add','--',*paths],check=True)
+          assert set(subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines())==set(paths)
+          PY
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'KQS 1.1.0: generation-pinned whole exports and observed state with tested legacy fallback'
+          git push origin "HEAD:refs/heads/$TARGET"
+          git rev-parse HEAD | tee evidence/source-commit.txt
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: kqs-r2-integration-evidence
+          path: candidate/evidence/
+          retention-days: 14
