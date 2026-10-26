@@ -13,5 +13,6 @@ javac --release 21 -proc:none -encoding UTF-8 -cp "$LOGBOOK_JAR:$JAR" -d "$TMP" 
 java -cp "$TMP:$LOGBOOK_JAR:$JAR" local.kancolle.kqs.QuestStoreTest
 java -cp "$TMP:$LOGBOOK_JAR:$JAR" local.kancolle.kqs.QuestExporterTest
 java -cp "$TMP:$LOGBOOK_JAR:$JAR" local.kancolle.kqs.QuestRegressionTest
+java -cp "$TMP:$LOGBOOK_JAR:$JAR" local.kancolle.kqs.QuestGenerationTest
 jar tf "$JAR" | grep -qx 'META-INF/services/logbook.listener.ContentListenerSpi'
 jar tf "$JAR" | grep -qx 'META-INF/services/logbook.plugin.lifecycle.StartUp'

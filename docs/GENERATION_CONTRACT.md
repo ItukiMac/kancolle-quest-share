@@ -1,0 +1,5 @@
+# Host generation contract (1.1.0)
+
+Exports acquire one host definition scope before enumerating or enriching any quest. Every local condition and its source lookup uses that generation. The root definition_snapshot records generation and fingerprint; customquest content remains user-owned and outside this managed-definition identity. A host state read boundary serializes export with synchronous host API handlers where available. host_state_observation records the last processed host API sequence, not full game freshness. Existing ALL-tab capture validation remains mandatory for snapshot_verified.
+
+Adapters discover the additive host API reflectively so legacy hosts remain supported. Missing APIs are explicitly marked unsupported. An error in a present API is not silently downgraded to a successful legacy snapshot. No raw HTTP, tokens, cookies, fleet identifiers or user accounts are added to the export. New read scopes do not write files, install updates or change game state. No automatic release or production installation is performed.

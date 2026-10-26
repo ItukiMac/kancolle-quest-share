@@ -31,7 +31,60 @@ public final class QuestExporter {
     private QuestExporter() {}
 
     public static String json(QuestStore store) {
-        return encode(build(store, List.copyOf(AppQuestCollection.get().getQuest().values()), true));
+        return readHostState(() -> {
+            Map<String,Object> result = build(store, List.copyOf(AppQuestCollection.get().getQuest().values()), true);
+            result.put("host_state_observation", hostState());
+            return encode(result);
+        });
+    }
+
+    private static <T> T readHostState(java.util.function.Supplier<T> action) {
+        try {
+            var method = LogBookCoreServices.class.getMethod("readGameState", java.util.function.Supplier.class);
+            @SuppressWarnings("unchecked") T result = (T) method.invoke(null, action);
+            return result;
+        } catch (NoSuchMethodException e) { return action.get(); }
+        catch (ReflectiveOperationException e) { throw new IllegalStateException("Host state snapshot failed", e); }
+    }
+
+    private static Map<String,Object> hostState() {
+        try {
+            Object view = LogBookCoreServices.class.getMethod("gameStateView").invoke(null);
+            Object snapshot = Class.forName("logbook.plugin.api.GameStateView").getMethod("snapshot").invoke(view);
+            Class<?> type = snapshot.getClass();
+            Map<String,Object> value = new LinkedHashMap<>();
+            value.put("supported",true);
+            value.put("sequence",type.getMethod("sequence").invoke(snapshot));
+            value.put("update_succeeded",type.getMethod("updateSucceeded").invoke(snapshot));
+            value.put("definition_generation_at_last_api",type.getMethod("definitionGeneration").invoke(snapshot));
+            value.put("meaning","Last processed API handler group, not a claim that every game object is fresh.");
+            return value;
+        } catch (NoSuchMethodException | ClassNotFoundException e) {return Map.of("supported",false);}
+        catch (ReflectiveOperationException e) {throw new IllegalStateException("Host state metadata failed",e);}
+    }
+
+    private static final class PinnedDefinitions implements AutoCloseable {
+        final AutoCloseable lease;
+        final Map<String,Object> metadata;
+        private PinnedDefinitions(AutoCloseable lease,Map<String,Object> metadata){this.lease=lease;this.metadata=metadata;}
+        static PinnedDefinitions open() {
+            Object raw=null;
+            try {
+                raw=LogBookCoreServices.class.getMethod("pinDefinitions").invoke(null);
+                Object snapshot=Class.forName("logbook.plugin.api.GameDefinitionScope").getMethod("snapshot").invoke(raw);
+                String generation=(String)snapshot.getClass().getMethod("generation").invoke(snapshot);
+                String fingerprint=(String)snapshot.getClass().getMethod("fingerprint").invoke(snapshot);
+                return new PinnedDefinitions((AutoCloseable)raw,Map.of("supported",true,"initialized",!generation.equals("runtime-not-started"),"generation",generation,"fingerprint",fingerprint));
+            } catch(NoSuchMethodException | ClassNotFoundException e) {
+                if(raw!=null) {closeLease((AutoCloseable)raw);throw new IllegalStateException("Incomplete host definition API",e);}
+                return new PinnedDefinitions(null,Map.of("supported",false,"initialized",false,"reason","legacy_host_no_generation_contract"));
+            } catch(ReflectiveOperationException e) {
+                if(raw!=null)closeLease((AutoCloseable)raw);
+                throw new IllegalStateException("Cannot pin host definitions",e);
+            }
+        }
+        public void close(){if(lease!=null)closeLease(lease);}
+        private static void closeLease(AutoCloseable lease){try{lease.close();}catch(Exception e){throw new IllegalStateException("Cannot close definition lease",e);}}
     }
 
     public static String prompt(QuestStore store) {
@@ -55,6 +108,14 @@ public final class QuestExporter {
 
     /** Also used by isolated tests so we can prove accepted AND unaccepted are exported. */
     static Map<String, Object> build(QuestStore store, Collection<AppQuest> values, boolean enrich) {
+        try (PinnedDefinitions definitions = PinnedDefinitions.open()) {
+            Map<String,Object> result = buildPinned(store, values, enrich);
+            result.put("definition_snapshot", definitions.metadata);
+            return result;
+        }
+    }
+
+    private static Map<String, Object> buildPinned(QuestStore store, Collection<AppQuest> values, boolean enrich) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("schema", "kqs.quest-snapshot.v2");
         root.put("product", "KQS Logbook Plugin");
